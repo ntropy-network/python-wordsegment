@@ -10,3 +10,4 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.16.3", features = ["extension-module", "anyhow"] }
 anyhow = "1.0.44"
+lazy_static = "1.4.0"

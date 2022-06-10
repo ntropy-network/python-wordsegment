@@ -1,18 +1,65 @@
+#[macro_use]
+extern crate lazy_static;
 use anyhow::Context;
+use pyo3::exceptions;
 use pyo3::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
 use std::path::Path;
 
-static TOTAL: f64 = 1024908267229.0;
+lazy_static! {
+    static ref ALPHABET: HashSet<char> = HashSet::from([
+        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
+        's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    ]);
+}
 
-#[pyclass]
+#[derive(Clone, Copy)]
+enum CleanOption {
+    Standard,
+    LowerOnly,
+}
+
+impl CleanOption {
+    #[inline]
+    fn clean(self, text: String) -> String {
+        // Return `text` lower-cased with non-alphanumeric characters removed.
+        let mut text_lower = text.to_lowercase();
+        match self {
+            CleanOption::Standard => {
+                text_lower.retain(|b: char| ALPHABET.contains(&b));
+            }
+            _ => {}
+        };
+        text_lower
+    }
+}
+impl FromPyObject<'_> for CleanOption {
+    fn extract(ob: &'_ PyAny) -> PyResult<Self> {
+        let val = match String::extract(ob) {
+            Ok(s) => match s.as_str() {
+                "standard" => CleanOption::Standard,
+                "lower_only" => CleanOption::LowerOnly,
+                _ => {
+                    return Err(exceptions::PyValueError::new_err(format!(
+                        "unknown clean_option: {}",
+                        s.as_str()
+                    )));
+                }
+            },
+            Err(err) => return Err(exceptions::PyValueError::new_err(err)),
+        };
+        Ok(val)
+    }
+}
+#[pyclass(subclass)]
 struct Segmenter {
     basepath: String,
     unigrams: HashMap<String, f64>,
     bigrams: HashMap<String, f64>,
-    alphabet: HashSet<char>,
+    #[pyo3(set)]
+    cleaner: CleanOption,
 
     #[pyo3(get, set)]
     limit: usize,
@@ -24,6 +71,7 @@ struct Searcher<'a> {
     unigrams: &'a HashMap<String, f64>,
     bigrams: &'a HashMap<String, f64>,
     limit: usize,
+    total: f64,
     memo: HashMap<(&'a str, &'a str), (f64, Vec<&'a str>)>,
 }
 
@@ -32,13 +80,15 @@ impl<'a> Searcher<'a> {
         unigrams: &'a HashMap<String, f64>,
         bigrams: &'a HashMap<String, f64>,
         limit: usize,
+        total: f64,
     ) -> Self {
         let memo: HashMap<(&'a str, &'a str), (f64, Vec<&'a str>)> = HashMap::new();
         Searcher {
-            unigrams,
-            bigrams,
-            memo,
-            limit,
+            unigrams: unigrams,
+            bigrams: bigrams,
+            limit: limit,
+            total: total,
+            memo: memo,
         }
     }
 
@@ -53,13 +103,13 @@ impl<'a> Searcher<'a> {
             Some(p) => p,
             None => {
                 if let Some(v) = self.unigrams.get(word) {
-                    return v / TOTAL;
+                    return v / self.total;
                 }
 
                 // Penalize words not found in the unigrams according
                 // to their length, a crucial heuristic.
 
-                return 10.0 / (TOTAL * 10.0_f64.powf(word.len() as f64));
+                return 10.0 / (self.total * 10.0_f64.powf(word.len() as f64));
             }
         };
 
@@ -71,7 +121,7 @@ impl<'a> Searcher<'a> {
                 // word. The technical name is *stupid backoff* and it's
                 // not a probability distribution but it works well in
                 // practice.
-                return bigram_res / TOTAL / self.score(prev, None);
+                return bigram_res / self.total / self.score(prev, None);
             }
         }
         // Fall back to using the unigram probability.
@@ -145,15 +195,13 @@ impl Segmenter {
 
     fn clean(&self, text: String) -> String {
         // Return `text` lower-cased with non-alphanumeric characters removed.
-        let mut text_lower = text.to_lowercase();
-        text_lower.retain(|b: char| self.alphabet.contains(&b));
-        text_lower
+        self.cleaner.clean(text)
     }
 
     fn do_segment(&self, text: String) -> Vec<String> {
         let mut output: Vec<String> = Vec::new();
 
-        let mut s = Searcher::new(&self.unigrams, &self.bigrams, self.limit);
+        let mut s = Searcher::new(&self.unigrams, &self.bigrams, self.limit, self.total);
 
         let clean_text = self.clean(text);
         let size = 250;
@@ -188,18 +236,32 @@ impl Segmenter {
             basepath: basepath.to_string(),
             unigrams: HashMap::new(),
             bigrams: HashMap::new(),
-            alphabet: HashSet::from_iter([
-                'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p',
-                'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5',
-                '6', '7', '8', '9',
-            ]),
             limit,
             total: 0.0,
+            cleaner: CleanOption::Standard,
         }
+    }
+
+    #[getter]
+    fn cleaner(&self) -> PyResult<String> {
+        let v = match self.cleaner {
+            CleanOption::Standard => "standard".to_string(),
+            CleanOption::LowerOnly => "lower_only".to_string(),
+        };
+        Ok(v)
+    }
+
+    fn get_unigram(&mut self, key: String, default: f64) -> PyResult<f64> {
+        Ok(*self.unigrams.get(&key).unwrap_or(&default))
+    }
+
+    fn get_bigram(&mut self, key: String, default: f64) -> PyResult<f64> {
+        Ok(*self.bigrams.get(&key).unwrap_or(&default))
     }
 
     fn load(&mut self) -> PyResult<()> {
         self.py_load(&self.basepath.clone())?;
+        self.total = 1024908267229.0;
         Ok(())
     }
 

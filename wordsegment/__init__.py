@@ -33,21 +33,13 @@ import sys
 from .wordsegment import Segmenter as RustSegmenter
 
 
-def Segmenter():
-    s = RustSegmenter(op.dirname(op.realpath(__file__)))
-    s.load()
-    return s
+class Segmenter(RustSegmenter):
+    def __new__(cls, *args, **kwargs):
+        return super().__new__(cls, op.dirname(op.realpath(__file__), *args, **kwargs))
 
 
 __all__ = [
     "Segmenter",
-    "load",
-    "isegment",
-    "segment",
-    "UNIGRAMS",
-    "BIGRAMS",
-    "WORDS",
-    "main",
 ]
 __title__ = "wordsegment"
 __version__ = "1.3.1"
