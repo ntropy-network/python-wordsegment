@@ -83,7 +83,7 @@ impl<'a> Searcher<'a> {
         let previous = previous.unwrap_or("<s>");
 
         let divided = self.divide(text);
-        let mut max_candidate_value: f64 = 0.0;
+        let mut max_candidate_value: f64 = f64::NEG_INFINITY;
         let mut max_candidate: Vec<&str> = Vec::new();
         for (prefix, suffix) in divided {
             let prefix_score = self.score(prefix, Some(previous)).log10();
@@ -168,7 +168,6 @@ impl Segmenter {
         for word in prefix_words {
             output.push(word.to_string());
         }
-        dbg!(&output);
         output
     }
 }
