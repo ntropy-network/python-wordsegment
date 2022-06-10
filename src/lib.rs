@@ -48,35 +48,39 @@ impl<'a> Searcher<'a> {
         (1..end).map(|pos| (&text[..pos], &text[pos..]))
     }
 
-    fn score(&mut self, word: &str, previous: Option<&str>) -> f64 {
-        if previous.is_none() {
-            if let Some(v) = self.unigrams.get(word) {
-                return v / TOTAL;
+    fn score(&self, word: &str, previous: Option<&str>) -> f64 {
+        let prev = match previous {
+            Some(p) => p,
+            None => {
+                if let Some(v) = self.unigrams.get(word) {
+                    return v / TOTAL;
+                }
+
+                // Penalize words not found in the unigrams according
+                // to their length, a crucial heuristic.
+
+                return 10.0 / (TOTAL * 10.0_f64.powf(word.len() as f64));
             }
+        };
 
-            // Penalize words not found in the unigrams according
-            // to their length, a crucial heuristic.
-
-            return 10.0 / (TOTAL * 10.0_f64.powf(word.len() as f64));
-        }
-
-        let prev = previous.unwrap();
         let bigram = format!("{} {}", prev, word);
         let bigram_res = self.bigrams.get(&bigram);
-        if bigram_res.is_some() && self.unigrams.get(prev).is_some() {
-            // Conditional probability of the word given the previous
-            // word. The technical name is *stupid backoff* and it's
-            // not a probability distribution but it works well in
-            // practice.
-            return bigram_res.unwrap() / TOTAL / self.score(prev, None);
+        if let Some(bigram_res) = bigram_res {
+            if self.unigrams.get(prev).is_some() {
+                // Conditional probability of the word given the previous
+                // word. The technical name is *stupid backoff* and it's
+                // not a probability distribution but it works well in
+                // practice.
+                return bigram_res / TOTAL / self.score(prev, None);
+            }
         }
         // Fall back to using the unigram probability.
-        return self.score(word, None);
+        self.score(word, None)
     }
 
     fn search(&mut self, text: &'a str, previous: Option<&str>) -> (f64, Vec<&'a str>) {
         // Return max of candidates matching `text` given `previous` word.
-        if text == "" {
+        if text.is_empty() {
             return (0.0, Vec::new());
         }
 
@@ -89,19 +93,18 @@ impl<'a> Searcher<'a> {
             let prefix_score = self.score(prefix, Some(previous)).log10();
             let pair = (suffix, prefix);
 
-            let memo_res = self.memo.get(&pair);
-            if memo_res.is_none() {
+            if !self.memo.contains_key(&pair) {
                 let r = self.search(suffix, Some(prefix));
                 self.memo.insert(pair, r);
             }
-            let memo_res = self.memo.get(&pair);
-            let (suffix_score, suffix_words) = memo_res.unwrap();
+            let (suffix_score, suffix_words) = &self.memo[&pair];
 
             let candidate_score = prefix_score + suffix_score;
-            let mut candidate = vec![prefix];
-            candidate.extend(suffix_words);
             if candidate_score > max_candidate_value {
                 max_candidate_value = candidate_score;
+
+                let mut candidate = vec![prefix];
+                candidate.extend(suffix_words);
                 max_candidate = candidate;
             }
         }
@@ -124,10 +127,10 @@ impl Segmenter {
         let mut result: HashMap<String, f64> = HashMap::new();
         for line in reader.lines() {
             let mut line = line?;
-            if line == "" {
+            if line.is_empty() {
                 continue;
             }
-            let mut words = line.split("\t");
+            let mut words = line.split('\t');
             let word = words.next();
             let score = words.next();
             if let (Some(word), Some(score)) = (word, score) {
@@ -147,7 +150,7 @@ impl Segmenter {
         text_lower
     }
 
-    fn do_segment<'a>(&self, text: String) -> Vec<String> {
+    fn do_segment(&self, text: String) -> Vec<String> {
         let mut output: Vec<String> = Vec::new();
 
         let mut s = Searcher::new(&self.unigrams, &self.bigrams, self.limit);
@@ -159,7 +162,7 @@ impl Segmenter {
         for offset in (0..clean_text.len()).step_by(size) {
             let max_ = std::cmp::min(clean_text.len(), offset + size);
             let chunk: &str = &clean_text[offset-prefix_len..max_];
-            let (_, chunk_words) = s.search(&chunk, None);
+            let (_, chunk_words) = s.search(chunk, None);
             let len = chunk_words.len();
             let last_5 = &chunk_words[len.saturating_sub(5)..];
             prefix_len = last_5.iter().map(|word| word.len()).sum();
@@ -179,7 +182,7 @@ impl Segmenter {
 #[pymethods]
 impl Segmenter {
     #[new]
-    #[args(limit = "16")]
+    #[args(limit = "24")]
     fn new(basepath: &str, limit: usize) -> Self {
         Segmenter {
             basepath: basepath.to_string(),
@@ -203,6 +206,16 @@ impl Segmenter {
     fn segment(&mut self, word: String) -> PyResult<Vec<String>> {
         let res = self.do_segment(word);
         Ok(res)
+    }
+
+    fn add_unigram(&mut self, key: String, value: f64) -> PyResult<()> {
+        self.unigrams.insert(key, value);
+        Ok(())
+    }
+
+    fn add_bigram(&mut self, key: String, value: f64) -> PyResult<()> {
+        self.bigrams.insert(key, value);
+        Ok(())
     }
 }
 /// A Python module implemented in Rust.
