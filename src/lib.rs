@@ -161,7 +161,7 @@ impl Segmenter {
 
         for offset in (0..clean_text.len()).step_by(size) {
             let max_ = std::cmp::min(clean_text.len(), offset + size);
-            let chunk: &str = &clean_text[offset-prefix_len..max_];
+            let chunk: &str = &clean_text[offset - prefix_len..max_];
             let (_, chunk_words) = s.search(chunk, None);
             let len = chunk_words.len();
             let last_5 = &chunk_words[len.saturating_sub(5)..];
@@ -170,7 +170,7 @@ impl Segmenter {
                 output.push(word.to_string());
             }
         }
-        let (_, prefix_words) = s.search(&clean_text[clean_text.len()-prefix_len..], None);
+        let (_, prefix_words) = s.search(&clean_text[clean_text.len() - prefix_len..], None);
 
         for word in prefix_words {
             output.push(word.to_string());
