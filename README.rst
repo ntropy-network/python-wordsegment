@@ -2,7 +2,8 @@ Python Word Segmentation
 ========================
 
 `WordSegment`_ is an Apache2 licensed module for English word
-segmentation, written in pure-Python, and based on a trillion-word corpus.
+segmentation, modified from grantjenks/python-wordsegment ported to
+rust, and based on a trillion-word corpus.
 
 Based on code from the chapter "`Natural Language Corpus Data`_" by Peter
 Norvig from the book "`Beautiful Data`_" (Segaran and Hammerbacher, 2009).
@@ -23,7 +24,7 @@ phrase is lowercased with punctuation removed.
 Features
 --------
 
-- Pure-Python
+- ~Pure-Python~ Partly rust
 - Fully documented
 - 100% Test Coverage
 - Includes unigram and bigram data
@@ -46,7 +47,7 @@ Quickstart
 Installing `WordSegment`_ is simple with
 `pip <http://www.pip-installer.org/>`_::
 
-    $ pip install wordsegment
+    $ pip install wordsegment-rs
 
 You can access documentation in the interpreter with Python's built-in help
 function::
