@@ -13,7 +13,11 @@ struct Segmenter {
     unigrams: HashMap<String, f64>,
     bigrams: HashMap<String, f64>,
     alphabet: HashSet<char>,
+
+    #[pyo3(get, set)]
     limit: usize,
+    #[pyo3(get, set)]
+    total: f64,
 }
 
 struct Searcher<'a> {
@@ -31,21 +35,17 @@ impl<'a> Searcher<'a> {
     ) -> Self {
         let memo: HashMap<(&'a str, &'a str), (f64, Vec<&'a str>)> = HashMap::new();
         Searcher {
-            unigrams: unigrams,
-            bigrams: bigrams,
-            memo: memo,
-            limit: limit,
+            unigrams,
+            bigrams,
+            memo,
+            limit,
         }
     }
 
-    fn divide(&self, text: &'a str) -> Vec<(&'a str, &'a str)> {
+    fn divide(&self, text: &'a str) -> impl Iterator<Item = (&'a str, &'a str)> {
         // Yield `(prefix, suffix)` pairs from `text`.
-        let mut res: Vec<(&str, &str)> = Vec::new();
         let end = std::cmp::min(text.len(), self.limit) + 1;
-        for pos in 1..end {
-            res.push(((&text[0..pos]).clone(), (&text[pos..]).clone()));
-        }
-        res
+        (1..end).map(|pos| (&text[..pos], &text[pos..]))
     }
 
     fn score(&mut self, word: &str, previous: Option<&str>) -> f64 {
@@ -57,7 +57,7 @@ impl<'a> Searcher<'a> {
             // Penalize words not found in the unigrams according
             // to their length, a crucial heuristic.
 
-            return 10.0 / (TOTAL * (10 ^ word.len()) as f64);
+            return 10.0 / (TOTAL * 10.0_f64.powf(word.len() as f64));
         }
 
         let prev = previous.unwrap();
@@ -80,12 +80,15 @@ impl<'a> Searcher<'a> {
             return (0.0, Vec::new());
         }
 
+        let previous = previous.unwrap_or("<s>");
+
         let divided = self.divide(text);
         let mut max_candidate_value: f64 = 0.0;
         let mut max_candidate: Vec<&str> = Vec::new();
-        for (prefix, suffix) in divided.into_iter() {
-            let prefix_score = self.score(prefix, Some(previous.unwrap_or("<s>"))).log10();
+        for (prefix, suffix) in divided {
+            let prefix_score = self.score(prefix, Some(previous)).log10();
             let pair = (suffix, prefix);
+
             let memo_res = self.memo.get(&pair);
             if memo_res.is_none() {
                 let r = self.search(suffix, Some(prefix));
@@ -93,8 +96,9 @@ impl<'a> Searcher<'a> {
             }
             let memo_res = self.memo.get(&pair);
             let (suffix_score, suffix_words) = memo_res.unwrap();
+
             let candidate_score = prefix_score + suffix_score;
-            let mut candidate = Vec::from([prefix]);
+            let mut candidate = vec![prefix];
             candidate.extend(suffix_words);
             if candidate_score > max_candidate_value {
                 max_candidate_value = candidate_score;
@@ -152,17 +156,17 @@ impl Segmenter {
 
         for offset in (0..clean_text.len()).step_by(size) {
             let max_ = std::cmp::min(clean_text.len(), offset + size);
-            let chunk: &str = &clean_text.as_str()[offset..max_];
-            let se: String = format!("{}{}", prefix.clone(), chunk.clone());
+            let chunk: &str = &clean_text[offset..max_];
+            let se: String = format!("{}{}", prefix, chunk);
             search_prefixes.push(se);
         }
 
         for search_prefix in &search_prefixes {
-            let (_, chunk_words) = s.search(search_prefix.as_str(), None);
+            let (_, chunk_words) = s.search(search_prefix, None);
             let len = chunk_words.len();
-            let v = chunk_words[len - 5..len].join("");
+            let v = chunk_words[len.saturating_sub(5)..].join("");
             prefix = v;
-            for word in &chunk_words[..len - 5] {
+            for word in &chunk_words[..len.saturating_sub(5)] {
                 output.push(word.to_string());
             }
         }
@@ -184,15 +188,13 @@ impl Segmenter {
             basepath: basepath.to_string(),
             unigrams: HashMap::new(),
             bigrams: HashMap::new(),
-            alphabet: [
+            alphabet: HashSet::from_iter([
                 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p',
                 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5',
                 '6', '7', '8', '9',
-            ]
-            .into_iter()
-            .map(|b| b)
-            .collect(),
-            limit: limit,
+            ]),
+            limit,
+            total: 0.0,
         }
     }
 
@@ -201,12 +203,9 @@ impl Segmenter {
         Ok(())
     }
 
-    fn segment(&mut self, word: String) -> PyResult<Vec<PyObject>> {
+    fn segment(&mut self, word: String) -> PyResult<Vec<String>> {
         let res = self.do_segment(word);
-        let gil = Python::acquire_gil();
-        let py = gil.python();
-
-        Ok(res.into_iter().map(|a| a.to_object(py)).collect())
+        Ok(res)
     }
 }
 /// A Python module implemented in Rust.
