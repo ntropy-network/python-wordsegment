@@ -2,7 +2,7 @@ use anyhow::Context;
 use pyo3::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::prelude::*;
+use std::io::{prelude::*, BufReader};
 use std::path::Path;
 
 static TOTAL: f64 = 1024908267229.0;
@@ -119,19 +119,23 @@ impl Segmenter {
     }
 
     fn parse(&mut self, filename: &str) -> anyhow::Result<HashMap<String, f64>> {
-        let mut file = File::open(filename)?;
-        let mut contents = String::new();
+        let file = File::open(filename)?;
+        let reader = BufReader::new(file);
         let mut result: HashMap<String, f64> = HashMap::new();
-        file.read_to_string(&mut contents)?;
-        for line in contents.split("\n") {
+        for line in reader.lines() {
+            let mut line = line?;
             if line == "" {
                 continue;
             }
-            let words = line.split("\t").collect::<Vec<&str>>();
-            assert_eq!(words.len(), 2);
-            let word = words[0];
-            let score = words[1].parse::<f64>()?;
-            result.insert(word.to_string(), score);
+            let mut words = line.split("\t");
+            let word = words.next();
+            let score = words.next();
+            if let (Some(word), Some(score)) = (word, score) {
+                let score = score.parse::<f64>()?;
+                let wordlen = word.len();
+                line.truncate(wordlen);
+                result.insert(line, score);
+            }
         }
         Ok(result)
     }
