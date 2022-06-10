@@ -150,31 +150,25 @@ impl Segmenter {
 
         let clean_text = self.clean(text);
         let size = 250;
-        let mut prefix = "".to_string();
-
-        let mut search_prefixes: Vec<String> = Vec::new();
+        let mut prefix_len = 0;
 
         for offset in (0..clean_text.len()).step_by(size) {
             let max_ = std::cmp::min(clean_text.len(), offset + size);
-            let chunk: &str = &clean_text[offset..max_];
-            let se: String = format!("{}{}", prefix, chunk);
-            search_prefixes.push(se);
-        }
-
-        for search_prefix in &search_prefixes {
-            let (_, chunk_words) = s.search(search_prefix, None);
+            let chunk: &str = &clean_text[offset-prefix_len..max_];
+            let (_, chunk_words) = s.search(&chunk, None);
             let len = chunk_words.len();
-            let v = chunk_words[len.saturating_sub(5)..].join("");
-            prefix = v;
+            let last_5 = &chunk_words[len.saturating_sub(5)..];
+            prefix_len = last_5.iter().map(|word| word.len()).sum();
             for word in &chunk_words[..len.saturating_sub(5)] {
                 output.push(word.to_string());
             }
         }
-        let (_, prefix_words) = s.search(prefix.as_str(), None);
+        let (_, prefix_words) = s.search(&clean_text[clean_text.len()-prefix_len..], None);
 
-        for word in prefix_words.into_iter() {
+        for word in prefix_words {
             output.push(word.to_string());
         }
+        dbg!(&output);
         output
     }
 }
