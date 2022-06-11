@@ -1,8 +1,10 @@
 #[macro_use]
 extern crate lazy_static;
 use anyhow::Context;
+use anyhow::bail;
 use pyo3::exceptions;
 use pyo3::prelude::*;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{prelude::*, BufReader};
@@ -53,11 +55,34 @@ impl FromPyObject<'_> for CleanOption {
         Ok(val)
     }
 }
+
+fn parse_bigram_borrowed(s: &str) -> anyhow::Result<[Cow<'_, str>; 2]> {
+    let mut words = s.split(' ');
+    let w1 = words.next();
+    let w2 = words.next();
+    let w3 = words.next();
+    match (w1, w2, w3) {
+        (Some(w1), Some(w2), None) => Ok([w1.into(), w2.into()]),
+        _ => bail!("invalid bigram"),
+    }
+}
+
+fn parse_bigram_owned(s: &str) -> anyhow::Result<[Cow<'static, str>; 2]> {
+    let mut words = s.split(' ');
+    let w1 = words.next();
+    let w2 = words.next();
+    let w3 = words.next();
+    match (w1, w2, w3) {
+        (Some(w1), Some(w2), None) => Ok([w1.to_owned().into(), w2.to_owned().into()]),
+        _ => bail!("invalid bigram"),
+    }
+}
+
 #[pyclass(subclass)]
 struct Segmenter {
     basepath: String,
     unigrams: HashMap<String, f64>,
-    bigrams: HashMap<String, f64>,
+    bigrams: HashMap<[Cow<'static, str>; 2], f64>,
     #[pyo3(set)]
     cleaner: CleanOption,
 
@@ -69,7 +94,7 @@ struct Segmenter {
 
 struct Searcher<'a> {
     unigrams: &'a HashMap<String, f64>,
-    bigrams: &'a HashMap<String, f64>,
+    bigrams: &'a HashMap<[Cow<'static, str>; 2], f64>,
     limit: usize,
     total: f64,
     memo: HashMap<(&'a str, &'a str), (f64, Vec<&'a str>)>,
@@ -78,7 +103,7 @@ struct Searcher<'a> {
 impl<'a> Searcher<'a> {
     fn new(
         unigrams: &'a HashMap<String, f64>,
-        bigrams: &'a HashMap<String, f64>,
+        bigrams: &'a HashMap<[Cow<'static, str>; 2], f64>,
         limit: usize,
         total: f64,
     ) -> Self {
@@ -113,7 +138,7 @@ impl<'a> Searcher<'a> {
             }
         };
 
-        let bigram = format!("{} {}", prev, word);
+        let bigram: [Cow<str>; 2] = [prev.into(), word.into()];
         let bigram_res = self.bigrams.get(&bigram);
         if let Some(bigram_res) = bigram_res {
             if self.unigrams.get(prev).is_some() {
@@ -166,12 +191,12 @@ impl<'a> Searcher<'a> {
 impl Segmenter {
     fn py_load(&mut self, basepath: &str) -> anyhow::Result<()> {
         let path = Path::new(basepath);
-        self.unigrams = self.parse(path.join("unigrams.txt").to_str().context("")?)?;
-        self.bigrams = self.parse(path.join("bigrams.txt").to_str().context("")?)?;
+        self.unigrams = self.parse_unigrams(path.join("unigrams.txt").to_str().context("")?)?;
+        self.bigrams = self.parse_bigrams(path.join("bigrams.txt").to_str().context("")?)?;
         Ok(())
     }
 
-    fn parse(&mut self, filename: &str) -> anyhow::Result<HashMap<String, f64>> {
+    fn parse_unigrams(&mut self, filename: &str) -> anyhow::Result<HashMap<String, f64>> {
         let file = File::open(filename)?;
         let reader = BufReader::new(file);
         let mut result: HashMap<String, f64> = HashMap::new();
@@ -188,6 +213,27 @@ impl Segmenter {
                 let wordlen = word.len();
                 line.truncate(wordlen);
                 result.insert(line, score);
+            }
+        }
+        Ok(result)
+    }
+
+    fn parse_bigrams(&mut self, filename: &str) -> anyhow::Result<HashMap<[Cow<'static, str>; 2], f64>> {
+        let file = File::open(filename)?;
+        let reader = BufReader::new(file);
+        let mut result: HashMap<[Cow<str>; 2], f64> = HashMap::new();
+        for line in reader.lines() {
+            let line = line?;
+            if line.is_empty() {
+                continue;
+            }
+            let mut words = line.split('\t');
+            let bigram = words.next();
+            let score = words.next();
+            if let (Some(bigram), Some(score)) = (bigram, score) {
+                let score = score.parse::<f64>()?;
+                let bigram = parse_bigram_owned(bigram)?;
+                result.insert(bigram, score);
             }
         }
         Ok(result)
@@ -256,7 +302,8 @@ impl Segmenter {
     }
 
     fn get_bigram(&mut self, key: String, default: f64) -> PyResult<f64> {
-        Ok(*self.bigrams.get(&key).unwrap_or(&default))
+        let bigram = parse_bigram_borrowed(&key)?;
+        Ok(*self.bigrams.get(&bigram).unwrap_or(&default))
     }
 
     fn load(&mut self) -> PyResult<()> {
@@ -276,7 +323,8 @@ impl Segmenter {
     }
 
     fn add_bigram(&mut self, key: String, value: f64) -> PyResult<()> {
-        self.bigrams.insert(key, value);
+        let bigram = parse_bigram_owned(&key)?;
+        self.bigrams.insert(bigram, value);
         Ok(())
     }
 }
