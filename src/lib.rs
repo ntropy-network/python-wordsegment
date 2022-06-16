@@ -330,7 +330,7 @@ impl Segmenter {
 }
 /// A Python module implemented in Rust.
 #[pymodule]
-#[pyo3(name = "wordsegment")]
+#[pyo3(name = "wordsegment_rs")]
 fn python_wordsegment(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Segmenter>()?;
     Ok(())

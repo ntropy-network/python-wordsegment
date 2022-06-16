@@ -5,7 +5,7 @@ into its constituent parts. For example, consider a phrase like "thisisatest".
 For humans, it's relatively easy to parse. This module makes it easy for
 machines too. Use `segment` to parse a phrase into its parts:
 
->>> from wordsegment import load, segment
+>>> from wordsegment_rs import load, segment
 >>> load()
 >>> segment('thisisatest')
 ['this', 'is', 'a', 'test']
@@ -30,7 +30,7 @@ import io
 import math
 import os.path as op
 import sys
-from .wordsegment import Segmenter as RustSegmenter
+from .wordsegment_rs import Segmenter as RustSegmenter
 
 
 class Segmenter(RustSegmenter):
@@ -41,7 +41,7 @@ class Segmenter(RustSegmenter):
 __all__ = [
     "Segmenter",
 ]
-__title__ = "wordsegment"
+__title__ = "wordsegment_rs"
 __version__ = "1.3.1"
 __build__ = 0x010301
 __author__ = "Grant Jenks"

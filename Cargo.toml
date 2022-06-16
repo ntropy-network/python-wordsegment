@@ -1,10 +1,10 @@
 [package]
-name = "wordsegment"
+name = "wordsegment-rs"
 version = "0.1.1"
 edition = "2021"
 
 [lib]
-name = "wordsegment"
+name = "wordsegment_rs"
 crate-type = ["cdylib"]
 
 [dependencies]
